@@ -970,6 +970,19 @@ function registerIpcHandlers() {
     return chatService.getSessionMessageCounts(sessionIds)
   })
 
+  ipcMain.handle('chat:getExportContentSessionCounts', async (_, options?: {
+    triggerRefresh?: boolean
+    forceRefresh?: boolean
+  }) => {
+    return chatService.getExportContentSessionCounts(options)
+  })
+
+  ipcMain.handle('chat:refreshExportContentSessionCounts', async (_, options?: {
+    forceRefresh?: boolean
+  }) => {
+    return chatService.refreshExportContentSessionCounts(options)
+  })
+
   ipcMain.handle('chat:enrichSessionsContactInfo', async (_, usernames: string[]) => {
     return chatService.enrichSessionsContactInfo(usernames)
   })

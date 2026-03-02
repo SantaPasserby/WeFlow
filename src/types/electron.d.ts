@@ -113,6 +113,28 @@ export interface ElectronAPI {
       counts?: Record<string, number>
       error?: string
     }>
+    getExportContentSessionCounts: (options?: {
+      triggerRefresh?: boolean
+      forceRefresh?: boolean
+    }) => Promise<{
+      success: boolean
+      data?: {
+        totalSessions: number
+        textSessions: number
+        voiceSessions: number
+        imageSessions: number
+        videoSessions: number
+        emojiSessions: number
+        pendingMediaSessions: number
+        updatedAt: number
+        refreshing: boolean
+      }
+      error?: string
+    }>
+    refreshExportContentSessionCounts: (options?: { forceRefresh?: boolean }) => Promise<{
+      success: boolean
+      error?: string
+    }>
     enrichSessionsContactInfo: (usernames: string[]) => Promise<{
       success: boolean
       contacts?: Record<string, { displayName?: string; avatarUrl?: string }>

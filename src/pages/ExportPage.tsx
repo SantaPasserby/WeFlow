@@ -537,6 +537,30 @@ interface SessionExportCacheMeta {
   source: 'memory' | 'disk' | 'fresh'
 }
 
+interface ExportContentSessionCountsSummary {
+  totalSessions: number
+  textSessions: number
+  voiceSessions: number
+  imageSessions: number
+  videoSessions: number
+  emojiSessions: number
+  pendingMediaSessions: number
+  updatedAt: number
+  refreshing: boolean
+}
+
+const defaultContentSessionCounts: ExportContentSessionCountsSummary = {
+  totalSessions: 0,
+  textSessions: 0,
+  voiceSessions: 0,
+  imageSessions: 0,
+  videoSessions: 0,
+  emojiSessions: 0,
+  pendingMediaSessions: 0,
+  updatedAt: 0,
+  refreshing: false
+}
+
 const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
   let timer: ReturnType<typeof setTimeout> | null = null
   try {
@@ -851,6 +875,9 @@ function ExportPage() {
     totalPosts: 0,
     totalFriends: 0
   })
+  const [contentSessionCounts, setContentSessionCounts] = useState<ExportContentSessionCountsSummary>(defaultContentSessionCounts)
+  const [isContentSessionCountsLoading, setIsContentSessionCountsLoading] = useState(true)
+  const [hasSeededContentSessionCounts, setHasSeededContentSessionCounts] = useState(false)
   const [hasSeededSnsStats, setHasSeededSnsStats] = useState(false)
   const [nowTick, setNowTick] = useState(Date.now())
   const tabCounts = useContactTypeCountsStore(state => state.tabCounts)
@@ -1385,6 +1412,42 @@ function ExportPage() {
     }
   }, [])
 
+  const loadContentSessionCounts = useCallback(async (options?: { silent?: boolean; forceRefresh?: boolean }) => {
+    if (!options?.silent) {
+      setIsContentSessionCountsLoading(true)
+    }
+    try {
+      const result = await withTimeout(
+        window.electronAPI.chat.getExportContentSessionCounts({
+          triggerRefresh: true,
+          forceRefresh: options?.forceRefresh === true
+        }),
+        3200
+      )
+      if (result?.success && result.data) {
+        const next: ExportContentSessionCountsSummary = {
+          totalSessions: Number.isFinite(result.data.totalSessions) ? Math.max(0, Math.floor(result.data.totalSessions)) : 0,
+          textSessions: Number.isFinite(result.data.textSessions) ? Math.max(0, Math.floor(result.data.textSessions)) : 0,
+          voiceSessions: Number.isFinite(result.data.voiceSessions) ? Math.max(0, Math.floor(result.data.voiceSessions)) : 0,
+          imageSessions: Number.isFinite(result.data.imageSessions) ? Math.max(0, Math.floor(result.data.imageSessions)) : 0,
+          videoSessions: Number.isFinite(result.data.videoSessions) ? Math.max(0, Math.floor(result.data.videoSessions)) : 0,
+          emojiSessions: Number.isFinite(result.data.emojiSessions) ? Math.max(0, Math.floor(result.data.emojiSessions)) : 0,
+          pendingMediaSessions: Number.isFinite(result.data.pendingMediaSessions) ? Math.max(0, Math.floor(result.data.pendingMediaSessions)) : 0,
+          updatedAt: Number.isFinite(result.data.updatedAt) ? Math.max(0, Math.floor(result.data.updatedAt)) : 0,
+          refreshing: result.data.refreshing === true
+        }
+        setContentSessionCounts(next)
+        setHasSeededContentSessionCounts(true)
+      }
+    } catch (error) {
+      console.error('加载导出内容会话统计失败:', error)
+    } finally {
+      if (!options?.silent) {
+        setIsContentSessionCountsLoading(false)
+      }
+    }
+  }, [])
+
   const loadSessions = useCallback(async () => {
     const loadToken = Date.now()
     sessionLoadTokenRef.current = loadToken
@@ -1631,6 +1694,7 @@ function ExportPage() {
     void loadBaseConfig()
     void ensureSharedTabCountsLoaded()
     void loadSessions()
+    void loadContentSessionCounts({ forceRefresh: true })
 
     // 朋友圈统计延后一点加载，避免与首屏会话初始化抢占。
     const timer = window.setTimeout(() => {
@@ -1638,7 +1702,15 @@ function ExportPage() {
     }, 120)
 
     return () => window.clearTimeout(timer)
-  }, [isExportRoute, ensureSharedTabCountsLoaded, loadBaseConfig, loadSessions, loadSnsStats])
+  }, [isExportRoute, ensureSharedTabCountsLoaded, loadBaseConfig, loadSessions, loadSnsStats, loadContentSessionCounts])
+
+  useEffect(() => {
+    if (!isExportRoute) return
+    const timer = window.setInterval(() => {
+      void loadContentSessionCounts({ silent: true })
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [isExportRoute, loadContentSessionCounts])
 
   useEffect(() => {
     if (isExportRoute) return
@@ -2497,8 +2569,14 @@ function ExportPage() {
 
   const contentCards = useMemo(() => {
     const scopeSessions = sessions.filter(isContentScopeSession)
-    const totalSessions = tabCounts.private + tabCounts.group + tabCounts.former_friend
     const snsExportedCount = Math.min(lastSnsExportPostCount, snsStats.totalPosts)
+    const contentSessionCountByType: Record<ContentType, number> = {
+      text: contentSessionCounts.textSessions,
+      voice: contentSessionCounts.voiceSessions,
+      image: contentSessionCounts.imageSessions,
+      video: contentSessionCounts.videoSessions,
+      emoji: contentSessionCounts.emojiSessions
+    }
 
     const sessionCards = [
       { type: 'text' as ContentType, icon: MessageSquareText },
@@ -2518,7 +2596,7 @@ function ExportPage() {
         ...item,
         label: contentTypeLabels[item.type],
         stats: [
-          { label: '总会话数', value: totalSessions },
+          { label: '可导出会话数', value: contentSessionCountByType[item.type] || 0 },
           { label: '已导出', value: exported }
         ]
       }
@@ -2535,7 +2613,7 @@ function ExportPage() {
     }
 
     return [...sessionCards, snsCard]
-  }, [sessions, tabCounts, lastExportByContent, snsStats, lastSnsExportPostCount])
+  }, [sessions, contentSessionCounts, lastExportByContent, snsStats, lastSnsExportPostCount])
 
   const activeTabLabel = useMemo(() => {
     if (activeTab === 'private') return '私聊'
@@ -3127,7 +3205,8 @@ function ExportPage() {
   const shouldShowFormatSection = !isContentScopeDialog || isContentTextDialog
   const shouldShowMediaSection = !isContentScopeDialog
   const isTabCountComputing = isSharedTabCountsLoading && !isSharedTabCountsReady
-  const isSessionCardStatsLoading = isBaseConfigLoading || (isSharedTabCountsLoading && !isSharedTabCountsReady)
+  const isSessionCardStatsLoading = isBaseConfigLoading || (isContentSessionCountsLoading && !hasSeededContentSessionCounts)
+  const isSessionCardStatsRefreshing = contentSessionCounts.refreshing || contentSessionCounts.pendingMediaSessions > 0
   const isSnsCardStatsLoading = !hasSeededSnsStats
   const taskRunningCount = tasks.filter(task => task.status === 'running').length
   const taskQueuedCount = tasks.filter(task => task.status === 'queued').length
@@ -3399,6 +3478,11 @@ function ExportPage() {
             <div key={card.type} className="content-card">
               <div className="card-header">
                 <div className="card-title"><Icon size={16} /> {card.label}</div>
+                {card.type !== 'sns' && !isCardStatsLoading && isSessionCardStatsRefreshing && (
+                  <span className="card-refresh-hint">
+                    刷新中<span className="animated-ellipsis" aria-hidden="true">...</span>
+                  </span>
+                )}
               </div>
               <div className="card-stats">
                 {card.stats.map((stat) => (

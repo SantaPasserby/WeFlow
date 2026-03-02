@@ -304,6 +304,13 @@
   flex-direction: column;
   gap: 8px;
 
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   .card-title {
     display: flex;
     align-items: center;
@@ -311,6 +318,12 @@
     font-size: 13px;
     color: var(--text-primary);
     font-weight: 600;
+  }
+
+  .card-refresh-hint {
+    color: var(--text-tertiary);
+    font-size: 11px;
+    white-space: nowrap;
   }
 
   .card-stats {
