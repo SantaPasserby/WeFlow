@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { Search, Calendar, User, X, Loader2 } from 'lucide-react'
 import { Avatar } from '../Avatar'
 import JumpToDatePopover from '../JumpToDatePopover'
@@ -46,7 +46,13 @@ export const SnsFilterPanel: React.FC<SnsFilterPanelProps> = ({
 }) => {
     const [showJumpPopover, setShowJumpPopover] = useState(false)
     const [jumpPopoverDate, setJumpPopoverDate] = useState<Date>(jumpTargetDate || new Date())
+    const [jumpDateCounts, setJumpDateCounts] = useState<Record<string, number>>({})
+    const [jumpDateMessageDates, setJumpDateMessageDates] = useState<Set<string>>(new Set())
+    const [hasLoadedJumpDateCounts, setHasLoadedJumpDateCounts] = useState(false)
+    const [loadingJumpDateCounts, setLoadingJumpDateCounts] = useState(false)
     const jumpCalendarWrapRef = useRef<HTMLDivElement | null>(null)
+    const jumpDateCountsCacheRef = useRef<Map<string, Record<string, number>>>(new Map())
+    const jumpDateRequestSeqRef = useRef(0)
 
     useEffect(() => {
         if (!showJumpPopover) return
@@ -63,6 +69,78 @@ export const SnsFilterPanel: React.FC<SnsFilterPanelProps> = ({
         if (showJumpPopover) return
         setJumpPopoverDate(jumpTargetDate || new Date())
     }, [jumpTargetDate, showJumpPopover])
+
+    const toMonthKey = useCallback((date: Date) => {
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    }, [])
+
+    const toDateKey = useCallback((timestampSeconds: number) => {
+        const date = new Date(timestampSeconds * 1000)
+        const year = date.getFullYear()
+        const month = String(date.getMonth() + 1).padStart(2, '0')
+        const day = String(date.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+    }, [])
+
+    const applyJumpDateCounts = useCallback((counts: Record<string, number>) => {
+        setJumpDateCounts(counts)
+        setJumpDateMessageDates(new Set(Object.keys(counts)))
+        setHasLoadedJumpDateCounts(true)
+    }, [])
+
+    const loadJumpDateCounts = useCallback(async (monthDate: Date) => {
+        const monthKey = toMonthKey(monthDate)
+        const cached = jumpDateCountsCacheRef.current.get(monthKey)
+        if (cached) {
+            applyJumpDateCounts(cached)
+            setLoadingJumpDateCounts(false)
+            return
+        }
+
+        const requestSeq = ++jumpDateRequestSeqRef.current
+        setLoadingJumpDateCounts(true)
+        setHasLoadedJumpDateCounts(false)
+
+        const year = monthDate.getFullYear()
+        const month = monthDate.getMonth()
+        const monthStart = new Date(year, month, 1, 0, 0, 0, 0)
+        const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999)
+        const startTime = Math.floor(monthStart.getTime() / 1000)
+        const endTime = Math.floor(monthEnd.getTime() / 1000)
+        const pageSize = 200
+        let offset = 0
+        const counts: Record<string, number> = {}
+
+        try {
+            while (true) {
+                const result = await window.electronAPI.sns.getTimeline(pageSize, offset, [], '', startTime, endTime)
+                if (!result?.success || !Array.isArray(result.timeline) || result.timeline.length === 0) {
+                    break
+                }
+                result.timeline.forEach((post) => {
+                    const key = toDateKey(Number(post.createTime || 0))
+                    if (!key) return
+                    counts[key] = (counts[key] || 0) + 1
+                })
+                if (result.timeline.length < pageSize) break
+                offset += pageSize
+            }
+
+            if (requestSeq !== jumpDateRequestSeqRef.current) return
+            jumpDateCountsCacheRef.current.set(monthKey, counts)
+            applyJumpDateCounts(counts)
+        } catch (error) {
+            console.error('加载朋友圈按日条数失败:', error)
+            if (requestSeq !== jumpDateRequestSeqRef.current) return
+            setJumpDateCounts({})
+            setJumpDateMessageDates(new Set())
+            setHasLoadedJumpDateCounts(true)
+        } finally {
+            if (requestSeq === jumpDateRequestSeqRef.current) {
+                setLoadingJumpDateCounts(false)
+            }
+        }
+    }, [applyJumpDateCounts, toDateKey, toMonthKey])
 
     const filteredContacts = contacts.filter(c =>
         (c.displayName || '').toLowerCase().includes(contactSearch.toLowerCase()) ||
@@ -139,7 +217,9 @@ export const SnsFilterPanel: React.FC<SnsFilterPanelProps> = ({
                                 className={`date-picker-trigger ${jumpTargetDate ? 'active' : ''}`}
                                 onClick={() => {
                                     if (!showJumpPopover) {
-                                        setJumpPopoverDate(jumpTargetDate || new Date())
+                                        const nextDate = jumpTargetDate || new Date()
+                                        setJumpPopoverDate(nextDate)
+                                        void loadJumpDateCounts(nextDate)
                                     }
                                     setShowJumpPopover(prev => !prev)
                                 }}
@@ -165,10 +245,18 @@ export const SnsFilterPanel: React.FC<SnsFilterPanelProps> = ({
                                 isOpen={showJumpPopover}
                                 currentDate={jumpPopoverDate}
                                 onClose={() => setShowJumpPopover(false)}
+                                onMonthChange={(date) => {
+                                    setJumpPopoverDate(date)
+                                    void loadJumpDateCounts(date)
+                                }}
                                 onSelect={(date) => {
                                     setJumpPopoverDate(date)
                                     setJumpTargetDate(date)
                                 }}
+                                messageDates={jumpDateMessageDates}
+                                hasLoadedMessageDates={hasLoadedJumpDateCounts}
+                                messageDateCounts={jumpDateCounts}
+                                loadingDateCounts={loadingJumpDateCounts}
                             />
                         </div>
                     </div>
