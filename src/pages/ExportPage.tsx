@@ -6091,10 +6091,10 @@ function ExportPage() {
                       <div className="dialog-format-select" ref={sessionFormatDropdownRef}>
                         <button
                           type="button"
-                          className={`time-range-trigger ${showSessionFormatSelect ? 'open' : ''}`}
+                          className={`time-range-trigger dialog-format-trigger ${showSessionFormatSelect ? 'open' : ''}`}
                           onClick={() => setShowSessionFormatSelect(prev => !prev)}
                         >
-                          <span>{activeDialogFormatLabel}</span>
+                          <span className="dialog-format-trigger-label">{activeDialogFormatLabel}</span>
                           <span className="time-range-arrow">&gt;</span>
                         </button>
                         {showSessionFormatSelect && (
