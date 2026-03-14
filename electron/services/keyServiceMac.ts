@@ -382,21 +382,25 @@ export class KeyServiceMac {
     const lines = String(stdout).split(/\r?\n/).map(x => x.trim()).filter(Boolean)
     if (!lines.length) throw new Error('elevated helper returned empty output')
 
-    // 找最后一个能成功 parse 的 JSON 行（stderr 混入 stdout 时会有非 JSON 行）
-    let payload: any
-    let lastJsonLine = ''
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (!lines[i].startsWith('{')) continue
-      try {
-        payload = JSON.parse(lines[i])
-        lastJsonLine = lines[i]
-        break
-      } catch { continue }
+    // 从所有行里提取所有 JSON 对象（同一行可能有多个拼接），找含 key/result 的那个
+    const extractJsonObjects = (s: string): any[] => {
+      const results: any[] = []
+      const re = /\{[^{}]*\}/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(s)) !== null) {
+        try { results.push(JSON.parse(m[0])) } catch { }
+      }
+      return results
     }
-    if (!payload) throw new Error('elevated helper returned invalid json: ' + lines[lines.length - 1])
-    if (payload?.success === true && typeof payload?.key === 'string') return payload.key
-    if (typeof payload?.result === 'string') return payload.result
-    throw new Error('elevated helper json missing key/result')
+    const fullOutput = lines.join('\n')
+    const allJson = extractJsonObjects(fullOutput)
+    // 优先找 success=true && key 字段
+    const successPayload = allJson.find(p => p?.success === true && typeof p?.key === 'string')
+    if (successPayload) return successPayload.key
+    // 其次找 result 字段
+    const resultPayload = allJson.find(p => typeof p?.result === 'string')
+    if (resultPayload) return resultPayload.result
+    throw new Error('elevated helper returned invalid json: ' + lines[lines.length - 1])
   }
 
   private mapDbKeyErrorMessage(code?: string, detail?: string): string {
