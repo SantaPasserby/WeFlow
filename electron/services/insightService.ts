@@ -17,7 +17,7 @@ import https from 'https'
 import http from 'http'
 import { URL } from 'url'
 import { ConfigService } from './config'
-import { chatService, type ChatSession, type Message } from './chatService'
+import { chatService, ChatSession, Message } from './chatService'
 import { showNotification } from '../windows/notificationWindow'
 
 // ─── 常量 ────────────────────────────────────────────────────────────────────
@@ -106,20 +106,21 @@ function callApi(
       stream: false
     })
 
-    const options: https.RequestOptions = {
+    const options = {
       hostname: urlObj.hostname,
       port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
       path: urlObj.pathname + urlObj.search,
-      method: 'POST',
+      method: 'POST' as const,
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
+        'Content-Length': Buffer.byteLength(body).toString(),
         Authorization: `Bearer ${apiKey}`
       }
     }
 
     const isHttps = urlObj.protocol === 'https:'
-    const req = (isHttps ? https : http).request(options, (res) => {
+    const requestFn = isHttps ? https.request : http.request
+    const req = requestFn(options, (res) => {
       let data = ''
       res.on('data', (chunk) => { data += chunk })
       res.on('end', () => {
@@ -431,7 +432,7 @@ class InsightService {
             const time = new Date(Number(m.createTime) * 1000).toLocaleString('zh-CN')
             return `[${time}] ${sender}：${content}`
           })
-          contextSection = `\n\n近期对话记录（最近 ${msgLines.length} 条）：\n${msgLines.join('\n')}`
+          contextSection = `\n\n��期对话记录（最近 ${msgLines.length} 条）：\n${msgLines.join('\n')}`
         }
       } catch (e) {
         console.warn('[InsightService] 拉取上下文失败:', e)
